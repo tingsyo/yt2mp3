@@ -9,11 +9,18 @@ import argparse
 import os
 import sys
 from pathlib import Path
-import yt-dlp
+import yt_dlp
 import eyed3
 from pydub import AudioSegment
+import types
 
-def extract_youtube_audio(video_url, output_filename='extracted_audio'):
+# Create a fake audioop module to bypass the pydub import crash
+if sys.version_info >= (3, 13):
+    sys.modules['audioop'] = types.ModuleType('audioop')
+    sys.modules['pyaudioop'] = types.ModuleType('pyaudioop')
+
+def extract_youtube_audio(yt_url, output_filename=None):
+    # Set download options
     ydl_opts = {
         # Select the best quality audio-only stream
         'format': 'bestaudio/best',
@@ -26,13 +33,20 @@ def extract_youtube_audio(video_url, output_filename='extracted_audio'):
         # Output template for the file name
         'outtmpl': f'{output_filename}.%(ext)s',
     }
-    #
+    # Use the video title as output_filename if not specified
+    if output_filename is None:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(yt_url, download=False)
+            output_filename = info['title'].replace(' ','_')
+            print(f"output_filename is not specified, set title: {info['title']}")
+            ydl_opts['outtmpl'] = f'{output_filename}.%(ext)s'
+    # Download
     print("Downloading and extracting audio...")
-    with yt-dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([video_url])
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([yt_url])
     print(f"Successfully saved as {output_filename}.mp3")
     #
-    return(0)
+    return(output_filename)
 
 def normalize_average_loudness(audio_uri, target_dBFS=-20.0):
     # 1. Load your audio file
@@ -59,5 +73,41 @@ def edit_mp3_metadata(audio_uri, metadata):
     audiofile.tag.save()
     return(0)
 
+def youtube_to_mp3(yt_url, metadata=None, output_filename=None):
+    ''' Extract the audio from the yt-url, add metadata, and export to a mp3 file. '''
+    ofilename = extract_youtube_audio(yt_url=yt_url, output_filename=output_filename)
+    normalized = normalize_average_loudness(audio_uri=ofilename+".mp3")
+    # Process metada
+    if metadata is None:
+        metadata = {"title": ofilename, "artist":"unknown", "album":"unknown","date":"unknown"}
+    else:
+        if not metadata["title"]:
+            metadata["title"] = ofilename
+        if not metadata["artist"]:
+            metadata["artist"] = "unknown"
+        if not metadata["album"]:
+            metadata["album"] = "unknown"
+        if not metadata["date"]:
+            metadata["date"] = "unknown"
+    edited = edit_mp3_metadata(ofilename+".mp3", metadata)
+    return(edited)
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Download YouTube video or audio locally.")
+    parser.add_argument("--url", "-u", required=True, help="YouTube video URL")
+    parser.add_argument("--output-dir", "-o", default="downloads", help="Output directory (default: 'downloads')")
+    parser.add_argument("--audio-only", "-a", action="store_true", help="Download audio track only (WAV format)")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress verbose output")
+
+    args = parser.parse_args()
+
+    try:
+        youtube_to_mp3(args.url)
+    except Exception as e:
+        print(f"[-] Error downloading video: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
