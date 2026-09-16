@@ -13,6 +13,7 @@ import yt_dlp
 import eyed3
 from pydub import AudioSegment
 import types
+import pandas as pd
 
 # Create a fake audioop module to bypass the pydub import crash
 if sys.version_info >= (3, 13):
@@ -20,7 +21,13 @@ if sys.version_info >= (3, 13):
     sys.modules['pyaudioop'] = types.ModuleType('pyaudioop')
 
 def extract_youtube_audio(yt_url, output_filename=None):
-    # Set download options
+     # Use the video title as output_filename if not specified
+    if output_filename is None:
+        with yt_dlp.YoutubeDL({'skip_download': True,}) as ydl:
+            info = ydl.extract_info(yt_url, download=False)
+            output_filename = info['title'].replace(' ','_')
+            print(f"output_filename is not specified, set title: {info['title']}")
+   # Set download options
     ydl_opts = {
         # Select the best quality audio-only stream
         'format': 'bestaudio/best',
@@ -33,13 +40,6 @@ def extract_youtube_audio(yt_url, output_filename=None):
         # Output template for the file name
         'outtmpl': f'{output_filename}.%(ext)s',
     }
-    # Use the video title as output_filename if not specified
-    if output_filename is None:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(yt_url, download=False)
-            output_filename = info['title'].replace(' ','_')
-            print(f"output_filename is not specified, set title: {info['title']}")
-            ydl_opts['outtmpl'] = f'{output_filename}.%(ext)s'
     # Download
     print("Downloading and extracting audio...")
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -95,18 +95,33 @@ def youtube_to_mp3(yt_url, metadata=None, output_filename=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Download YouTube video or audio locally.")
-    parser.add_argument("--url", "-u", required=True, help="YouTube video URL")
+    #parser.add_argument("--url", "-u", required=True, help="YouTube video URL")
+    parser.add_argument("--input", "-i", required=True, help="List of music in csv format.")
     parser.add_argument("--output-dir", "-o", default="downloads", help="Output directory (default: 'downloads')")
     parser.add_argument("--audio-only", "-a", action="store_true", help="Download audio track only (WAV format)")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress verbose output")
-
     args = parser.parse_args()
-
-    try:
-        youtube_to_mp3(args.url)
-    except Exception as e:
-        print(f"[-] Error downloading video: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Read list
+    musiclist = pd.read_csv(args.input, dtype=str, na_values="unknown")
+    print("The playlist contains "+ str(musiclist.shape[0]) +" songs.")
+    # Loop through list
+    for row in musiclist.itertuples():
+        # Parse data
+        yt_url = row.youtube
+        metadata = {
+            'title': str(row.name),
+            'artist': str(row.artist),
+            'album': str(row.album),
+            'date': str(row.date),
+        }
+        output_filename = "downloads/"+row.date+"_"+row.name
+        print(metadata)
+        # download and processing
+        try:
+            youtube_to_mp3(yt_url, metadata, output_filename)
+        except Exception as e:
+            print(f"[-] Error downloading video: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+yt-dlp
+eyed3
+pydub
+pandas
